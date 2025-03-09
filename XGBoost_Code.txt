@@ -1,0 +1,1092 @@
+#### Program for Bias Correction and Downscaling of CMIP6 GCMs####
+
+
+#### Part1: Generating Parameter Sets at the Coarser Resolution (1 Degree) and applying Quantile Delta Mapping####
+
+
+# Clear the environment and console
+rm(list=ls())
+cat("\014") 
+
+#### Libraries ####
+# Load required libraries for bias correction, netCDF manipulation, quantile mapping, and data handling.
+library(hydroGOF)
+library(ncdf4)
+library(qmap)
+library(ncdf4.helpers)
+library(DataCombine)
+library(chron)
+
+# Set working directory to the directory containing input files for the Godavari study region (26 Grid Points).
+setwd('YOUR_DIRECTORY_PATH/inputs/Godavari/')
+
+# Read Grid point (26) features at the coarser resolution (1 Degree) from CSV (ObjectID, latitude, longitude, elevation, slope and aspect)
+points = read.csv('features_1_degree.csv')
+points = points[-1]
+po_lat = points$Latitude
+po_lon = points$Longitude
+
+## IMD Observed data ##
+# Initialize variables for observed and model precipitation data.
+ap_imd = NULL; ap_gcm = NULL; perf_sp = NULL; bc_hist = NULL; ap_rcp45 = NULL
+bc_rcp45 = NULL; ap_rcp85 = NULL; bc_rcp85 = NULL; perf_raw = NULL
+
+# Loop over each point (grid cell) defined by the coordinates in the CSV.
+for (loc in 1:length(po_lat)) {
+
+  print(paste("Pr Point Number:",loc))
+  dp1 = NULL
+  
+  # Set working directory to your IMD 1-degree rainfall data directory.
+  setwd('YOUR_DIRECTORY_PATH/inputs/IMD_1_degree_rainfall/') 
+  files = list.files(pattern = "*.nc") 
+  
+  # Loop over each NetCDF file (each representing one year).
+  for (year in 1:length(files)) {
+    
+    imd = nc_open(files[year])
+    
+    # For specific years use different variable names for rainfall, longitude, and latitude.
+    if (year > 54 && year < 61){
+      imd_array = ncvar_get(imd,"rainfall")
+      imd_array[is.na(imd_array)] = -99
+      lon_imd = ncvar_get(imd, varid = "lon")
+      lat_imd = ncvar_get(imd, varid = "lat")
+    }else{
+      imd_array = ncvar_get(imd, "RAINFALL") 
+      imd_array[is.na(imd_array)] = -99
+      lon_imd = ncvar_get(imd, varid = "LONGITUDE")
+      lat_imd = ncvar_get(imd, varid = "LATITUDE")
+    }
+    
+    # Select the closest grid point based on latitude and longitude.
+    n2 = po_lat[loc]; n1 = po_lon[loc] 
+    ila = which(abs(lat_imd-n2)==min(abs(lat_imd-n2)))
+    ilo = which(abs(lon_imd-n1)==min(abs(lon_imd-n1)))
+    
+    dp = imd_array[ilo,ila,]
+    
+    dp1 = append(dp1,dp)
+    nc_close(imd)
+    
+  }
+  
+  # Combine or process the observed precipitation data.
+  obs_pr = dp1[1:23376]
+  obs = obs_pr
+  
+  
+  ## CMIP6 GCM data of historical for 1st model (NO-LEAP YEAR)##
+  # Set working directory to your CMIP6 EC-Earth3 historical precipitation data directory.
+  setwd('YOUR_DIRECTORY_PATH/CMIP6/EC-Earth3/historical/pr') 
+
+  files = list.files(pattern = "*.nc") 
+  dp=NULL; dp1 =NULL;dp2=NULL;dp3=NULL
+  
+  # Loop through each NetCDF file for the model data.
+  for (year in 1:length(files)) {
+    
+    gcm = nc_open(files[year])
+    
+    n2 = po_lat[loc]; n1 = po_lon[loc] 
+    gcm_array = ncvar_get(gcm,"pr")
+    lon_gcm = ncvar_get(gcm, varid = "lon")
+    lat_gcm = ncvar_get(gcm, varid = "lat")
+
+    ila = which(abs(lat_gcm-n2)==min(abs(lat_gcm-n2)))
+    ilo = which(abs(lon_gcm-n1)==min(abs(lon_gcm-n1)))
+    
+    dp = gcm_array[ilo,ila,]
+    dp = dp *86400  # Convert units to daily totals
+    dp1 = append(dp1,dp)
+    nc_close(gcm)
+    
+  }
+  
+  library(DataCombine)
+  dp2 = data.frame(dp1)
+  
+  # Insert missing leap day rows as needed.
+  for (ly in 1:16) {
+    if (ly == 1){
+      rn = 425
+      dp2 = InsertRow(dp2, NewRow = 0, RowNum = rn)
+    } else{
+      rn = rn + 1 +(365*4)
+      dp2 = InsertRow(dp2, NewRow = 0, RowNum = rn)
+    }
+  }
+  
+  dp3 = dp2[['dp1']]
+  pp = dp3
+  
+  # Compute goodness-of-fit between the model and observed data.
+  perf = gof(pp,obs)
+  
+  # Fit the quantile mapping model using quantile delta mapping method and apply bias correction.
+  qdm_fit = fitQmap(obs,pp, method = "QDM",wet.day = TRUE)
+  qdm_out = doQmap(pp,spline_fit)
+ 
+  pr_raw1 = pp #### 
+  pr_bc1 = qdm_out ####
+  pr_sf1 = qdm_fit
+ 
+  ## CMIP6 GCM data of historical for 2nd model (GREGORGIAN CALENDAR) ##
+  # Set working directory to your CMIP6 MIROC6 historical precipitation data directory.
+  setwd('YOUR_DIRECTORY_PATH/CMIP6/MIROC6/pr') 
+  files = list.files(pattern = "*.nc") 
+  dp=NULL; dp1 =NULL;dp2=NULL;dp3=NULL;gcm_array=NULL;
+ 
+  for (year in 1:length(files)) {
+   
+    gcm = nc_open(files[year])
+    
+    n2 = po_lat[loc]; n1 = po_lon[loc] 
+    gcm_array = ncvar_get(gcm,"pr")
+    #gcm_array[is.na(imd_array)] = -99
+    lon_gcm = ncvar_get(gcm, varid = "lon")
+    lat_gcm = ncvar_get(gcm, varid = "lat")
+    
+    ila = which(abs(lat_gcm-n2)==min(abs(lat_gcm-n2)))
+    ilo = which(abs(lon_gcm-n1)==min(abs(lon_gcm-n1)))
+    
+    dp = gcm_array[ilo,ila,]
+    dp = dp *86400
+    dp1 = append(dp1,dp)
+    nc_close(gcm)
+   
+  }
+ 
+  library(DataCombine)
+  dp2 = data.frame(dp1)
+  
+  for (ly in 1:16) {
+    if (ly == 1){
+      rn = 425
+      dp2 = InsertRow(dp2, NewRow = 0, RowNum = rn)
+    } else{
+      rn = rn + 1 +(365*4)
+      dp2 = InsertRow(dp2, NewRow = 0, RowNum = rn)
+    }
+  }
+ 
+  dp3 = dp2[['dp1']]
+  pp = dp1
+ 
+
+  qdm_fit = fitQmap(obs_pr,pp, method = "QDM")
+  qdm_out = doQmap(pp,qdm_fit)
+ 
+  pr_sf2 = qdm_fit
+  pr_raw2 = pp #### 
+  pr_bc2 = qdm_out ####
+ 
+  ## CMIP6 GCM data of historical for 3rd model (GREGORGIAN CALENDAR)##
+  # Set working directory to your CMIP6 MRI-ESM2-0 historical precipitation data directory.
+  setwd('YOUR_DIRECTORY_PATH/CMIP6/MRI-ESM2_0/pr') 
+  files = list.files(pattern = "*.nc") 
+  dp=NULL; dp1 =NULL;dp2=NULL;dp3=NULL
+ 
+  for (year in 1:length(files)) {
+    
+    gcm = nc_open(files[year])
+    
+    n2 = po_lat[loc]; n1 = po_lon[loc] 
+    gcm_array = ncvar_get(gcm,"pr")
+    #gcm_array[is.na(imd_array)] = -99
+    lon_gcm = ncvar_get(gcm, varid = "lon")
+    lat_gcm = ncvar_get(gcm, varid = "lat")
+    
+    ila = which(abs(lat_gcm-n2)==min(abs(lat_gcm-n2)))
+    ilo = which(abs(lon_gcm-n1)==min(abs(lon_gcm-n1)))
+    dp = gcm_array[ilo,ila,]
+    
+    dp = dp *86400
+    dp1 = append(dp1,dp)
+    nc_close(gcm)
+    
+  }
+ 
+  library(DataCombine)
+  dp2 = data.frame(dp1)
+  
+  for (ly in 1:16) {
+    if (ly == 1){
+      rn = 425
+      dp2 = InsertRow(dp2, NewRow = 0, RowNum = rn)
+    } else{
+      rn = rn + 1 +(365*4)
+      dp2 = InsertRow(dp2, NewRow = 0, RowNum = rn)
+    }
+  }
+ 
+  dp3 = dp2[['dp1']]
+  pp = dp1
+ 
+  qdm_fit = fitQmap(obs_pr,pp, method = "QDM")
+  qdm_out = doQmap(pp,qdm_fit)
+ 
+  pr_sf3 = qdm_fit
+  pr_raw3 = pp #### 
+  pr_bc3 = qdm_out ####
+ 
+  ## CMIP6 GCM data of historical for 4th model (GREGORGIAN CALENDAR) ##
+  # Set working directory to your CMIP6 GFDL_ESM4 historical precipitation data directory.
+  setwd('YOUR_DIRECTORY_PATH/CMIP6/GFDL_ESM4/pr') 
+  files = list.files(pattern = "*.nc") 
+  dp=NULL; dp1 =NULL;dp2=NULL;dp3=NULL
+ 
+  for (year in 1:length(files)) {
+    
+    gcm = nc_open(files[year])
+    
+    n2 = po_lat[loc]; n1 = po_lon[loc] 
+    gcm_array = ncvar_get(gcm,"pr")
+    #gcm_array[is.na(imd_array)] = -99
+    lon_gcm = ncvar_get(gcm, varid = "lon")
+    lat_gcm = ncvar_get(gcm, varid = "lat")
+    
+    ila = which(abs(lat_gcm-n2)==min(abs(lat_gcm-n2)))
+    ilo = which(abs(lon_gcm-n1)==min(abs(lon_gcm-n1)))
+    dp = gcm_array[ilo,ila,]
+    
+    dp = dp *86400
+    dp1 = append(dp1,dp)
+    nc_close(gcm)
+    
+  }
+ 
+  library(DataCombine)
+  dp2 = data.frame(dp1)
+  
+  for (ly in 1:16) {
+    if (ly == 1){
+      rn = 425
+      dp2 = InsertRow(dp2, NewRow = 0, RowNum = rn)
+    } else{
+      rn = rn + 1 +(365*4)
+      dp2 = InsertRow(dp2, NewRow = 0, RowNum = rn)
+    }
+  }
+ 
+  dp3 = dp2[['dp1']]
+  pp = dp1
+
+  qdm_fit = fitQmap(obs_pr,pp, method = "QDM")
+  qdm_out = doQmap(pp,qdm_fit)
+ 
+  pr_sf4 = qdm_fit
+  pr_raw4 = pp #### 
+  pr_bc4 = qdm_out ####
+ 
+  ## CMIP6 GCM data of historical for 5th model (GREGORGIAN CALENDAR)##
+  # Set working directory to your CMIP6 EC-Earth3-Veg historical precipitation data directory.
+  setwd('YOUR_DIRECTORY_PATH/CMIP6/EC-Earth3-Veg/pr') 
+  files = list.files(pattern = "*.nc") 
+  dp=NULL; dp1 =NULL;dp2=NULL;dp3=NULL
+  for (year in 1:length(files)) {
+    
+    gcm = nc_open(files[year])
+    
+    n2 = po_lat[loc]; n1 = po_lon[loc] 
+    gcm_array = ncvar_get(gcm,"pr")
+    #gcm_array[is.na(imd_array)] = -99
+    lon_gcm = ncvar_get(gcm, varid = "lon")
+    lat_gcm = ncvar_get(gcm, varid = "lat")
+    
+    ila = which(abs(lat_gcm-n2)==min(abs(lat_gcm-n2)))
+    ilo = which(abs(lon_gcm-n1)==min(abs(lon_gcm-n1)))
+    dp = gcm_array[ilo,ila,]
+    dp = dp *86400
+    dp1 = append(dp1,dp)
+    nc_close(gcm)
+    
+  }
+ 
+  library(DataCombine)
+  dp2 = data.frame(dp1)
+  
+  for (ly in 1:16) {
+    if (ly == 1){
+      rn = 425
+      dp2 = InsertRow(dp2, NewRow = 0, RowNum = rn)
+    } else{
+      rn = rn + 1 +(365*4)
+      dp2 = InsertRow(dp2, NewRow = 0, RowNum = rn)
+    }
+  }
+ 
+  dp3 = dp2[['dp1']]
+  pp = dp1
+ 
+  qdm_fit = fitQmap(obs_pr,pp, method = "QDM")
+  qdm_out = doQmap(pp,qdm_fit)
+ 
+  pr_sf5 = qdm_fit
+  pr_raw5 = pp #### 
+  pr_bc5 = qdm_out ####
+ 
+  ps2 = NULL
+ 
+  ## Latitude and longitude
+  # Extract coordinate information for the current point.
+  for (loop in 1:length(pr_bc1)) {
+    ps1 = points[loc,]
+    ps2 = rbind(ps2,ps1)
+  }
+ 
+  # Combine all precipitation and bias-corrected data with location information.
+  par_set = cbind(pr_raw1,pr_bc1,pr_raw2,pr_bc2,pr_raw3,pr_bc3,pr_raw4,pr_bc4,pr_raw5,pr_bc5,ps2,obs_pr)
+  
+  # Set working directory to your output directory for par_set data.
+  setwd('YOUR_DIRECTORY_PATH/par_set_coarse/Par_set_pr/Godavari/')
+  
+  name = paste(loc,'_par_set.RData',sep="")
+  save(par_set, file = name)
+  
+  # Set working directory to your output directory for bias correction coefficients.
+  setwd('YOUR_DIRECTORY_PATH/par_set_coarse/Qu_BC_C_pr/Godavari')
+  
+  name = paste(loc,'_Coefficients_Spline.RData',sep="")
+  save(pr_sf1,pr_sf2,pr_sf3,pr_sf4,pr_sf5,file = name)
+  
+}
+
+
+
+#### Part2: Generating Parameter Sets at the Finer Resolution (0.25 Degree) and applying Quantile Delta Mapping####
+
+#### Program for Bias Correction ####
+
+rm(list=ls())
+cat("\014") 
+
+#### Libraries ####
+# Load required libraries for bias correction, netCDF data handling, quantile mapping, and data handling.
+library(hydroGOF)
+library(ncdf4)
+library(qmap)
+library(ncdf4.helpers)
+library(DataCombine)
+library(chron)
+
+# Set working directory for finer resolution input files for the Godavari region
+setwd('YOUR_DIRECTORY_PATH\\inputs\\Godavari\\')
+
+# Read the 0.25° feature (426 Grids) file containing ObjectID,latitudes, longitudes, Elevation, Slope, aspect and remove the first column (if not needed)
+points = read.csv('features_0.25_degree.csv')
+points = points[-1]
+po_lat = points$Latitude
+po_lon = points$Longitude
+
+## IMD Observed data ##
+# Initialize variables for observed and model precipitation data
+ap_imd = NULL; ap_gcm = NULL; perf_sp = NULL; bc_hist = NULL; ap_rcp45 = NULL
+bc_rcp45 = NULL; ap_rcp85 = NULL; bc_rcp85 = NULL; perf_raw = NULL
+
+for (loc in 1:length(po_lat)) {
+  
+  print(paste("Pr Point Number:", loc))
+  dp1 = NULL
+  
+  # Set working directory for finer resolution IMD rainfall data for Godavari region
+  setwd('YOUR_DIRECTORY_PATH\\inputs\\IMD_0.25_degree_rainfall\\') 
+  files = list.files(pattern = "*.nc") 
+  
+  for (year in 1:length(files)) {
+    imd = nc_open(files[year])
+    
+    # Read rainfall data and corresponding longitude and latitude arrays
+    imd_array = ncvar_get(imd, "RAINFALL") 
+    imd_array[is.na(imd_array)] = -99
+    lon_imd = ncvar_get(imd, varid = "LONGITUDE")
+    lat_imd = ncvar_get(imd, varid = "LATITUDE")
+    
+    n2 = po_lat[loc]; n1 = po_lon[loc] 
+    
+    # Find the nearest grid point based on latitude and longitude
+    ila = which(abs(lat_imd - n2) == min(abs(lat_imd - n2)))
+    ilo = which(abs(lon_imd - n1) == min(abs(lon_imd - n1)))
+    
+    dp = imd_array[ilo, ila, ]
+    dp1 = append(dp1, dp)
+    nc_close(imd)
+  }
+  
+  # Extract observed precipitation data
+  obs_pr = dp1[1:23376]
+  obs = obs_pr
+  
+  ## CMIP6 GCM data of historical for 1st model (NO-LEAP YEAR)##
+  # Set working directory for EC-Earth3 historical data
+  setwd('YOUR_DIRECTORY_PATH/CMIP6/EC-Earth3/historical/pr') 
+  files = list.files(pattern = "*.nc") 
+  dp = NULL; dp1 = NULL; dp2 = NULL; dp3 = NULL
+  
+  for (year in 1:length(files)) {
+    gcm = nc_open(files[year])
+    
+    n2 = po_lat[loc]; n1 = po_lon[loc] 
+    gcm_array = ncvar_get(gcm, "pr")
+    lon_gcm = ncvar_get(gcm, varid = "lon")
+    lat_gcm = ncvar_get(gcm, varid = "lat")
+    
+    # Find nearest grid point for the model data
+    ila = which(abs(lat_gcm - n2) == min(abs(lat_gcm - n2)))
+    ilo = which(abs(lon_gcm - n1) == min(abs(lon_gcm - n1)))
+    
+    dp = gcm_array[ilo, ila, ]
+    dp = dp * 86400  # Convert units to daily totals
+    dp1 = append(dp1, dp)
+    nc_close(gcm)
+  }
+  
+  library(DataCombine)
+  dp2 = data.frame(dp1)
+  # Insert rows for leap days if necessary
+  for (ly in 1:16) {
+    if (ly == 1) {
+      rn = 425
+      dp2 = InsertRow(dp2, NewRow = 0, RowNum = rn)
+    } else {
+      rn = rn + 1 + (365 * 4)
+      dp2 = InsertRow(dp2, NewRow = 0, RowNum = rn)
+    }
+  }
+  
+  dp3 = dp2[['dp1']]
+  pp = dp3
+  perf = gof(pp, obs)
+  
+ 
+  qdm_fit = fitQmap(obs, pp, method = "QDM", wet.day = TRUE)   
+  qdm_out = doQmap(pp, qdm_fit)                                 
+  pr_raw1 = pp 
+  pr_bc1 = qdm_out 
+  pr_sf1 = qdm_fit
+  
+  ## CMIP6 GCM data of historical for 2nd model (GREGORGIAN CALENDAR)##
+  setwd('YOUR_DIRECTORY_PATH/CMIP6/MIROC6/pr') 
+  files = list.files(pattern = "*.nc") 
+  dp = NULL; dp1 = NULL; dp2 = NULL; dp3 = NULL; gcm_array = NULL;
+  
+  for (year in 1:length(files)) {
+    gcm = nc_open(files[year])
+    
+    n2 = po_lat[loc]; n1 = po_lon[loc] 
+    gcm_array = ncvar_get(gcm, "pr")
+    # gcm_array[is.na(imd_array)] = -99   (Not used here)
+    lon_gcm = ncvar_get(gcm, varid = "lon")
+    lat_gcm = ncvar_get(gcm, varid = "lat")
+    
+    ila = which(abs(lat_gcm - n2) == min(abs(lat_gcm - n2)))
+    ilo = which(abs(lon_gcm - n1) == min(abs(lon_gcm - n1)))
+    
+    dp = gcm_array[ilo, ila, ]
+    dp = dp * 86400
+    dp1 = append(dp1, dp)
+    nc_close(gcm)
+  }
+  
+  library(DataCombine)
+  dp2 = data.frame(dp1)
+  for (ly in 1:16) {
+    if (ly == 1) {
+      rn = 425
+      dp2 = InsertRow(dp2, NewRow = 0, RowNum = rn)
+    } else {
+      rn = rn + 1 + (365 * 4)
+      dp2 = InsertRow(dp2, NewRow = 0, RowNum = rn)
+    }
+  }
+  
+  dp3 = dp2[['dp1']]
+  pp = dp1
+  
+  qdm_fit = fitQmap(obs_pr, pp, method = "QDM")   
+  qdm_out = doQmap(pp, qdm_fit)                    
+  pr_sf2 = qdm_fit
+  pr_raw2 = pp 
+  pr_bc2 = qdm_out 
+  
+  ## CMIP6 GCM data of historical for 3rd model (GREGORGIAN CALENDAR)##
+  setwd('YOUR_DIRECTORY_PATH/CMIP6/MRI-ESM2-0/pr') 
+  files = list.files(pattern = "*.nc") 
+  dp = NULL; dp1 = NULL; dp2 = NULL; dp3 = NULL;
+  
+  for (year in 1:length(files)) {
+    gcm = nc_open(files[year])
+    
+    n2 = po_lat[loc]; n1 = po_lon[loc] 
+    gcm_array = ncvar_get(gcm, "pr")
+    # gcm_array[is.na(imd_array)] = -99
+    lon_gcm = ncvar_get(gcm, varid = "lon")
+    lat_gcm = ncvar_get(gcm, varid = "lat")
+    
+    ila = which(abs(lat_gcm - n2) == min(abs(lat_gcm - n2)))
+    ilo = which(abs(lon_gcm - n1) == min(abs(lon_gcm - n1)))
+    dp = gcm_array[ilo, ila, ]
+    dp = dp * 86400
+    dp1 = append(dp1, dp)
+    nc_close(gcm)
+  }
+  
+  library(DataCombine)
+  dp2 = data.frame(dp1)
+  for (ly in 1:16) {
+    if (ly == 1) {
+      rn = 425
+      dp2 = InsertRow(dp2, NewRow = 0, RowNum = rn)
+    } else {
+      rn = rn + 1 + (365 * 4)
+      dp2 = InsertRow(dp2, NewRow = 0, RowNum = rn)
+    }
+  }
+  
+  dp3 = dp2[['dp1']]
+  pp = dp1
+  
+ 
+  qdm_fit = fitQmap(obs_pr, pp, method = "QDM")
+  qdm_out = doQmap(pp, qdm_fit)
+  pr_sf3 = qdm_fit
+  pr_raw3 = pp 
+  pr_bc3 = qdm_out 
+  
+  ## CMIP6 GCM data of historical for 4th model (GREGORGIAN CALENDAR)##
+  setwd('YOUR_DIRECTORY_PATH/CMIP6/GFDL-ESM4/pr') 
+  files = list.files(pattern = "*.nc") 
+  dp = NULL; dp1 = NULL; dp2 = NULL; dp3 = NULL;
+  
+  for (year in 1:length(files)) {
+    gcm = nc_open(files[year])
+    
+    n2 = po_lat[loc]; n1 = po_lon[loc] 
+    gcm_array = ncvar_get(gcm, "pr")
+    # gcm_array[is.na(imd_array)] = -99
+    lon_gcm = ncvar_get(gcm, varid = "lon")
+    lat_gcm = ncvar_get(gcm, varid = "lat")
+    
+    ila = which(abs(lat_gcm - n2) == min(abs(lat_gcm - n2)))
+    ilo = which(abs(lon_gcm - n1) == min(abs(lon_gcm - n1)))
+    dp = gcm_array[ilo, ila, ]
+    dp = dp * 86400
+    dp1 = append(dp1, dp)
+    nc_close(gcm)
+  }
+  
+  library(DataCombine)
+  dp2 = data.frame(dp1)
+  for (ly in 1:16) {
+    if (ly == 1) {
+      rn = 425
+      dp2 = InsertRow(dp2, NewRow = 0, RowNum = rn)
+    } else {
+      rn = rn + 1 + (365 * 4)
+      dp2 = InsertRow(dp2, NewRow = 0, RowNum = rn)
+    }
+  }
+  
+  dp3 = dp2[['dp1']]
+  pp = dp1
+  
+ 
+  qdm_fit = fitQmap(obs_pr, pp, method = "QDM")
+  qdm_out = doQmap(pp, qdm_fit)
+  pr_sf4 = qdm_fit
+  pr_raw4 = pp 
+  pr_bc4 = qdm_out 
+  
+  ## CMIP6 GCM data of historical for 5th model (GREGORGIAN CALENDAR)##
+  setwd('YOUR_DIRECTORY_PATH/CMIP6/EC-Earth3-Veg/pr') 
+  files = list.files(pattern = "*.nc") 
+  dp = NULL; dp1 = NULL; dp2 = NULL; dp3 = NULL;
+  
+  for (year in 1:length(files)) {
+    gcm = nc_open(files[year])
+    
+    n2 = po_lat[loc]; n1 = po_lon[loc] 
+    gcm_array = ncvar_get(gcm, "pr")
+    # gcm_array[is.na(imd_array)] = -99
+    lon_gcm = ncvar_get(gcm, varid = "lon")
+    lat_gcm = ncvar_get(gcm, varid = "lat")
+    
+    ila = which(abs(lat_gcm - n2) == min(abs(lat_gcm - n2)))
+    ilo = which(abs(lon_gcm - n1) == min(abs(lon_gcm - n1)))
+    
+    dp = gcm_array[ilo, ila, ]
+    dp = dp * 86400
+    dp1 = append(dp1, dp)
+    nc_close(gcm)
+  }
+  
+  library(DataCombine)
+  dp2 = data.frame(dp1)
+  for (ly in 1:16) {
+    if (ly == 1) {
+      rn = 425
+      dp2 = InsertRow(dp2, NewRow = 0, RowNum = rn)
+    } else {
+      rn = rn + 1 + (365 * 4)
+      dp2 = InsertRow(dp2, NewRow = 0, RowNum = rn)
+    }
+  }
+  
+  dp3 = dp2[['dp1']]
+  pp = dp1
+  
+ 
+  qdm_fit = fitQmap(obs_pr, pp, method = "QDM")
+  qdm_out = doQmap(pp, qdm_fit)
+  pr_sf5 = qdm_fit
+  pr_raw5 = pp  
+  pr_bc5 = qdm_out 
+  
+  ps2 = NULL
+  
+  ## Latitude and longitude: Append location information for the current point
+  for (loop in 1:length(pr_bc1)) {
+    ps1 = points[loc, ]
+    ps2 = rbind(ps2, ps1)
+  }
+  
+  # Combine raw, bias-corrected, and location data into a parameter set
+  par_set = cbind(pr_raw1, pr_bc1, pr_raw2, pr_bc2, pr_raw3, pr_bc3, pr_raw4, pr_bc4, pr_raw5, pr_bc5, ps2, obs_pr)
+  
+  # Set working directory for saving parameter set data; replace 'Indus' with 'Godavari'
+  setwd('YOUR_DIRECTORY_PATH/par_set_finer/Par_set_pr/Godavari')
+  name = paste(loc, '_par_set.RData', sep = "")
+  save(par_set, file = name)
+  
+  # Set working directory for saving QDM coefficients; replace 'Indus' with 'Godavari'
+  setwd('YOUR_DIRECTORY_PATH/par_set_finer/Qu_BC_C_pr/Godavari')
+  name = paste(loc, '_Coefficients_Spline.RData', sep = "")
+  save(pr_sf1, pr_sf2, pr_sf3, pr_sf4, pr_sf5, file = name)
+  
+}
+
+
+
+#### Part3: Stacking of parameter sets at the Coarser resolution for the rainy and non-rainy days####
+rm(list=ls())
+cat("\014") 
+
+## Stacking
+library(ncdf4)  # Load the ncdf4 package for working with netCDF files
+
+# Set the working directory to your input files location 
+setwd('WORKING_DIRECTORY/inputs/Godavari')
+
+# Read Grid point (26) features at the coarser resolution (1 Degree) from CSV (ObjectID, latitude, longitude, elevation, slope and aspect)
+points = read.csv('features_1_degree.csv')
+po_lat = points$Latitude
+po_lon = points$Longitude
+
+# Define the directories for the gridded files and where to save the stacked output
+# Replace WORKING_DIRECTORY with your actual directory when needed
+loc_files_gridded = 'WORKING_DIRECTORY/par_set_coarse/Par_set_pr/Godavari'
+sav_loc_stacked = 'WORKING_DIRECTORY/par_set_coarse/Stacked_pr/Godavari'
+
+#######
+#######
+d22 = NULL  # Initialize an empty object for stacking the data
+
+# Loop through each grid point and load the corresponding .RData file
+for (loc in 1:length(po_lat)) {
+  
+  # Change working directory to where the gridded .RData files are stored
+  setwd(loc_files_gridded)
+  
+  files = list.files(pattern = "*.RData")
+  
+  # Construct the filename for the current grid point
+  name = paste(loc,'_par_set.RData',sep="")
+  
+  d1 = load(name)  # Load the file; expect an object named "par_set"
+  
+  # Stack the loaded data with previous data
+  d22 = rbind(d22, par_set)
+  
+}  
+
+# Change working directory to where the stacked data will be saved
+setwd(sav_loc_stacked)
+
+# Save the combined (stacked) precipitation data
+save(d22, file = 'Stacked_PR.RData')
+
+sps = d22
+
+# Apply thresholding: if precipitation is below 2.5 set to 0, above 2.5 set to 1 for raw data
+sps$pr_raw1[sps$pr_raw1 < 2.5] = 0
+sps$pr_raw1[sps$pr_raw1 > 2.5] = 1
+sps$pr_raw2[sps$pr_raw2 < 2.5] = 0
+sps$pr_raw2[sps$pr_raw2 > 2.5] = 1
+sps$pr_raw3[sps$pr_raw3 < 2.5] = 0
+sps$pr_raw3[sps$pr_raw3 > 2.5] = 1
+sps$pr_raw4[sps$pr_raw4 < 2.5] = 0
+sps$pr_raw4[sps$pr_raw4 > 2.5] = 1
+sps$pr_raw5[sps$pr_raw5 < 2.5] = 0
+sps$pr_raw5[sps$pr_raw5 > 2.5] = 1
+
+# Apply thresholding for bias-corrected data
+sps$pr_bc1[sps$pr_bc1 < 2.5] = 0
+sps$pr_bc1[sps$pr_bc1 > 2.5] = 1
+sps$pr_bc2[sps$pr_bc2 < 2.5] = 0
+sps$pr_bc2[sps$pr_bc2 > 2.5] = 1
+sps$pr_bc3[sps$pr_bc3 < 2.5] = 0
+sps$pr_bc3[sps$pr_bc3 > 2.5] = 1
+sps$pr_bc4[sps$pr_bc4 < 2.5] = 0
+sps$pr_bc4[sps$pr_bc4 > 2.5] = 1
+sps$pr_bc5[sps$pr_bc5 < 2.5] = 0
+sps$pr_bc5[sps$pr_bc5 > 2.5] = 1
+
+# Apply thresholding for observed precipitation data
+sps$obs_pr[sps$obs_pr < 2.5] = 0
+sps$obs_pr[sps$obs_pr > 2.5] = 1
+
+# Save the thresholded (classified) stacked data
+save(sps, file = 'Stacked_PR_CL.RData')
+
+
+
+#### Part4: XGBoost set up and Hyperparameters Optimization####
+
+rm(list=ls())
+cat("\014")
+
+# Set working directory to the location of the stacked classified data
+setwd('WORKING_DIRECTORY/par_set_coarse/Stacked_pr/Godavari')
+ps = load('Stacked_PR_CL.RData')
+## dataset = sps
+
+## Keeping the raw and bias corrected data from the best performing EC-Earth3 GCM
+dataset = sps[,-c(1,3,4,5,7,8,9,10)]
+
+library(xgboost)
+library(caret)
+library(caTools)
+library(hydroGOF)
+library(rBayesianOptimization)  # For Bayesian hyperparameter optimization
+
+set.seed(12315454)
+split = sample.split(dataset$obs_pr, SplitRatio = 0.8)
+training_set = subset(dataset, split == TRUE)
+tr_obs = training_set[,8]
+test_set = subset(dataset, split == FALSE)
+te_obs = test_set[,8]
+
+###############################################
+## Hyperparameter Optimization for Classification ##
+## Using Bayesian Optimization to optimize 7 key parameters:
+##   - learning rate (eta) in (0.01, 1)
+##   - Number of Estimators (nrounds) in (100, 1000)
+##   - max depth in (1, 25)
+##   - min child weight in (1, 20)
+##   - subsample in (0.3, 1)
+##   - colsample by tree in (0.3, 1)
+##   - gamma in (0, 1)
+###############################################
+
+xgb_cv_bayes_class <- function(eta, nrounds, max_depth, min_child_weight, subsample, colsample_bytree, gamma) {
+  params <- list(
+    booster = "gbtree",
+    objective = "binary:logistic",
+    eval_metric = "error",
+    eta = eta,
+    max_depth = as.integer(max_depth),
+    min_child_weight = min_child_weight,
+    subsample = subsample,
+    colsample_bytree = colsample_bytree,
+    gamma = gamma
+  )
+  
+  cv <- xgb.cv(
+    params = params,
+    data = as.matrix(training_set[,-8]),
+    label = tr_obs,
+    nfold = 5,
+    nrounds = as.integer(nrounds),
+    verbose = 0,
+    early_stopping_rounds = 10,
+    maximize = FALSE
+  )
+  
+  # Return negative error to maximize the score
+  list(Score = -min(cv$evaluation_log$test_error_mean), Pred = cv$evaluation_log$test_error_mean)
+}
+
+set.seed(123)
+bayes_opt_class <- BayesianOptimization(
+  FUN = xgb_cv_bayes_class,
+  bounds = list(
+    eta = c(0.01, 1),
+    nrounds = c(100, 1000),
+    max_depth = c(1L, 25L),
+    min_child_weight = c(1, 20),
+    subsample = c(0.3, 1),
+    colsample_bytree = c(0.3, 1),
+    gamma = c(0, 1)
+  ),
+  init_points = 10,
+  n_iter = 20,
+  acq = "ei",
+  verbose = TRUE,
+  maximize = TRUE
+)
+
+best_params_class <- bayes_opt_class$Best_Par
+# Now use the best parameters to train the classifier
+params_class <- list(
+  booster = "gbtree",
+  objective = "binary:logistic",
+  eval_metric = "error",
+  eta = best_params_class$eta,
+  max_depth = as.integer(best_params_class$max_depth),
+  min_child_weight = best_params_class$min_child_weight,
+  subsample = best_params_class$subsample,
+  colsample_bytree = best_params_class$colsample_bytree,
+  gamma = best_params_class$gamma
+)
+
+classifier = xgboost(
+  data = as.matrix(training_set[,-8]),
+  label = tr_obs,
+  params = params_class,
+  nrounds = as.integer(best_params_class$nrounds),
+  verbose = 0
+)
+
+y_pred_tr = predict(classifier, newdata = as.matrix(training_set[,-8]))
+y_pred_tr = (y_pred_tr >= 0.5)
+
+y_pred_te = predict(classifier, newdata = as.matrix(test_set[,-8]))
+y_pred_te = (y_pred_te >= 0.5)
+
+# Save the classification model to the Godavari folder
+save(classifier, file="WORKING_DIRECTORY/par_set_coarse/Stacked_pr/Godavari/XGBoost_PR_CL_2.RData")
+
+## Regression ##
+ps = load('WORKING_DIRECTORY/par_set_coarse/Stacked_pr/Godavari/Stacked_PR.RData')
+dat = d22
+
+dat1 =  dat[!(dat$obs_pr < 2.5),]
+
+## Keeping the raw and bias corrected data from the best performing EC-Earth3 GCM
+dataset = dat1[,-c(1,3,4,5,7,8,9,10)]
+
+set.seed(12365454)
+split = sample.split(dataset$obs_pr, SplitRatio = 0.8)
+training_set = subset(dataset, split == TRUE)
+test_set = subset(dataset, split == FALSE)
+
+###############################################
+## Hyperparameter Optimization for Regression ##
+## Using Bayesian Optimization to optimize the same 7 key parameters:
+##   - learning rate (eta) in (0.01, 1)
+##   - Number of Estimators (nrounds) in (100, 1000)
+##   - max depth in (1, 25)
+##   - min child weight in (1, 20)
+##   - subsample in (0.3, 1)
+##   - colsample by tree in (0.3, 1)
+##   - gamma in (0, 1)
+###############################################
+
+xgb_cv_bayes_reg <- function(eta, nrounds, max_depth, min_child_weight, subsample, colsample_bytree, gamma) {
+  params <- list(
+    booster = "gbtree",
+    objective = "reg:squarederror",
+    eval_metric = "rmse",
+    eta = eta,
+    max_depth = as.integer(max_depth),
+    min_child_weight = min_child_weight,
+    subsample = subsample,
+    colsample_bytree = colsample_bytree,
+    gamma = gamma
+  )
+  
+  cv <- xgb.cv(
+    params = params,
+    data = as.matrix(training_set[,-8]),
+    label = training_set$obs_pr,
+    nfold = 5,
+    nrounds = as.integer(nrounds),
+    verbose = 0,
+    early_stopping_rounds = 10,
+    maximize = FALSE
+  )
+  
+  # Return negative RMSE to maximize the score
+  list(Score = -min(cv$evaluation_log$test_rmse_mean), Pred = cv$evaluation_log$test_rmse_mean)
+}
+
+set.seed(123)
+bayes_opt_reg <- BayesianOptimization(
+  FUN = xgb_cv_bayes_reg,
+  bounds = list(
+    eta = c(0.01, 1),
+    nrounds = c(100, 1000),
+    max_depth = c(1L, 25L),
+    min_child_weight = c(1, 20),
+    subsample = c(0.3, 1),
+    colsample_bytree = c(0.3, 1),
+    gamma = c(0, 1)
+  ),
+  init_points = 10,
+  n_iter = 20,
+  acq = "ei",
+  verbose = TRUE,
+  maximize = TRUE
+)
+
+best_params_reg <- bayes_opt_reg$Best_Par
+# Now use the best parameters to train the regressor
+params_reg <- list(
+  booster = "gbtree",
+  objective = "reg:squarederror",
+  eval_metric = "rmse",
+  eta = best_params_reg$eta,
+  max_depth = as.integer(best_params_reg$max_depth),
+  min_child_weight = best_params_reg$min_child_weight,
+  subsample = best_params_reg$subsample,
+  colsample_bytree = best_params_reg$colsample_bytree,
+  gamma = best_params_reg$gamma
+)
+
+regressor = xgboost(
+  data = as.matrix(training_set[,-8]),
+  label = training_set$obs_pr,
+  params = params_reg,
+  nrounds = as.integer(best_params_reg$nrounds),
+  verbose = 0
+)
+
+# Predicting the Test set results for regression
+y_pred_te = predict(regressor, newdata = as.matrix(test_set[,-8]))
+perf_te = gof(y_pred_te, test_set[,8])
+nse_te  = as.numeric(perf_te[10,])
+
+y_pred_tr = predict(regressor, newdata = as.matrix(training_set[,-8]))
+perf_tr = gof(y_pred_tr, training_set[,8])
+nse_tr  = as.numeric(perf_tr[10,])
+
+setwd('WORKING_DIRECTORY/par_set_coarse/Stacked_pr/Godavari')
+
+save(regressor, file="XGBoost_PR_RG_2.RData")
+
+
+
+#### Part5: Bias-correction and Downscaling at the finer resolution using XGBoost framework####
+
+    
+rm(list=ls())
+cat("\014")
+
+# Load required libraries for classification and regression using XGBoost, along with other utilities.
+library(xgboost)
+library(caret)
+library(caTools)
+library(caret)
+library(e1071)
+library(ncdf4)
+library(hydroGOF)
+
+#### Classification ####
+# Set working directory to the location of the stacked classified data
+setwd('WORKING_DIRECTORY/par_set_coarse/Stacked_pr/')
+# Load the pre-trained classification model saved as an RData file.
+ps = load('XGBoost_PR_CL_svm.RData')
+
+# Change working directory to the location of the input files (e.g., features CSV)
+setwd('WORKING_DIRECTORY/inputs/')
+
+# Read the CSV file with 0.25 degree features and extract latitude and longitude.
+points = read.csv('features_0.25_degree.csv')
+po_lat = points$Latitude
+po_lon = points$Longitude
+
+# Loop through each grid point
+for (loc in 1:length(po_lat)) {
+  print(paste("Pr Point Number:", loc))
+  
+  # Change directory to where the fine resolution parameter sets are stored.
+  setwd('WORKING_DIRECTORY/par_set_finer/par_set_pr/')
+  
+  # Construct the file name for the current grid point's parameter set.
+  name = paste(loc, "_par_set.RData", sep = "")
+  
+  # Load the parameter set data (assumed to be stored in an object called 'par_set').
+  data = load(name)
+  
+  # Assign the loaded parameter set to 'test_set'
+  test_set = par_set
+  
+  # The following commented-out lines indicate potential modifications to column names.
+  # colnames <- c("pr_bc1", "pr_bc3", "Latitude", "Longitude", "Ele_mean", "Slope", "Aspect")
+  # colnames(test_set) = classifier[["feature_names"]]
+  
+  # Predict classification probabilities using the pre-trained classifier.
+  y_pred = predict(classifier, newdata = as.matrix(test_set[-16]))
+  y_pred = (y_pred >= 0.5)
+  y_pred_clas = as.integer(y_pred)
+  
+  # The following commented lines calculate a confusion matrix and accuracy.
+  # cm = table(par_set[,16], y_pred_clas)
+  # accuracy = (cm[1,1] + cm[2,2]) / (cm[1,1] + cm[2,2] + cm[1,2] + cm[2,1])
+  
+  # Identify indices of rainy (1) and non-rainy (0) predictions.
+  y_pred_rainy = which(y_pred == 1)
+  y_pred_nonrainy = which(y_pred == 0)
+  
+  # print(paste("Accuracy_", loc, ":", accuracy, sep = ""))
+  
+  ### Regression ####
+  # Change directory to the stacked data for regression predictions.
+  setwd('WORKING_DIRECTORY/par_set_coarse/Stacked_pr/')
+  
+  # Load the pre-trained regression model saved as an RData file.
+  ps = load('XGBoost_PR_RG_svm.RData')
+  
+  filte = NULL
+  
+  # Loop through indices of predicted rainy grid cells to extract corresponding rows.
+  for (indx in 1:length(y_pred_rainy)) {
+    filt = par_set[y_pred_rainy[indx], ]
+    filte = rbind(filte, filt)
+  }
+  
+  filte = filte
+  # Predict regression values for the selected rainy grid cells.
+  y_pred_reg = predict(regressor, newdata = as.matrix(filte[-16]))
+  
+  df = NULL
+  
+  # Initialize a vector df with zeros for all grid points.
+  df[1:length(par_set[,1])] = 0 
+  
+  # Assign the predicted regression value to corresponding indices.
+  for (indx1 in 1:length(y_pred_rainy)) {
+    df[y_pred_rainy[indx1]] = y_pred_reg[indx1]
+  }
+  
+  # Optionally, uncomment the next line to force non-negative predictions.
+  # df[df < 0] = 0
+  
+
+  # Compute performance metrics (e.g., NSE) comparing predicted and observed values.
+  perf = gof(as.data.frame(df), par_set[16])
+  # perf_rg = mNSE(as.data.frame(df), par_set[,16])
+  
+  # Construct the file name to save the prediction results.
+  name = paste(loc, "_par_set.RData", sep = "")
+  
+  # Change working directory to where the predicted results should be saved.
+  setwd('WORKING_DIRECTORY/predicted_finer/pr/SVM')
+  
+  # Save the prediction results and performance metrics.
+  save(df, perf, file = name)
+  
+  # Optionally, print performance metrics.
+  # print(paste("mNSE_", loc, ":", perf_rg, sep = ""))
+  print(paste("NSE_", loc, ":", perf[10, 1], sep = ""))
+}
