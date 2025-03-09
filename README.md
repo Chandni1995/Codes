@@ -1,5 +1,5 @@
-# Program for Bias Correction and Downscaling of CMIP6 GCMs
-
+# Program for Bias Correction and Downscaling of CMIP6 GCMs (Precipitation)
+ 
 This repository contains a collection of R scripts designed for bias correction and downscaling of CMIP6 General Circulation Model (GCM) precipitation data using Quantile Delta Mapping (QDM) and the XGBoost framework. The repository is organized into several parts addressing different resolutions and processing steps for the Godavari study region.
 
 ## Overview
