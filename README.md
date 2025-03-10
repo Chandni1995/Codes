@@ -50,15 +50,15 @@ You can install these packages using the following command in R:
 
 install.packages(c("hydroGOF", "ncdf4", "qmap", "ncdf4.helpers", "DataCombine", "chron", "xgboost", "caret", "caTools", "e1071", "rBayesianOptimization"))
 
-Setup
-Working Directory:
+# Setup
+## Working Directory:
 Replace all instances of YOUR_DIRECTORY_PATH in the scripts with the full path to your working directory. This directory should contain your input data (netCDF files, CSV feature files) and desired output directories.
 
-Input Data:
+# Input Data:
 
 Place the netCDF files for IMD and CMIP6 GCM data in the appropriate subdirectories (e.g., inputs/Godavari/, inputs/IMD_1_degree_rainfall/, inputs/IMD_0.25_degree_rainfall/).
 Ensure the CSV files (features_1_degree.csv and features_0.25_degree.csv) with grid features are located in the inputs/ folder.
-Usage
+# Usage
 The repository contains multiple scripts corresponding to the parts described above. Run the scripts sequentially as follows:
 
 Part1: Generate parameter sets at 1° resolution and apply QDM for bias correction.
@@ -68,8 +68,8 @@ Part4: Set up the XGBoost framework and perform Bayesian hyperparameter optimiza
 Part5: Use the optimized XGBoost models for bias correction and downscaling at finer resolution.
 Each script is self-contained and includes comments explaining its function and usage. Make sure to update the working directory paths as specified before running the scripts.
 
-Model Training and Evaluation
-Classification:
+# Model Training and Evaluation
+## Classification:
 XGBoost is used to classify rainy vs. non-rainy days. Hyperparameter tuning is performed using Bayesian Optimization to select the best parameters from the following ranges:
 
 Learning rate (eta): (0.01, 1)
@@ -79,17 +79,17 @@ Minimum Child Weight: (1, 20)
 Subsample: (0.3, 1)
 Colsample by Tree: (0.3, 1)
 Gamma: (0, 1)
-Regression:
+## Regression:
 XGBoost is also used for regression to predict precipitation values. Similar hyperparameter tuning is performed using Bayesian Optimization.
 
 Performance metrics are computed using the hydroGOF package.
 
-Citation
+# Citation
 If you use this code in your research, please cite the following works:
 
 Thakur al., 2025.
 
-Contact
+# Contact
 For any questions or suggestions, please contact Dr. Chandni at chandnithakur2@gmail.com
 
 
