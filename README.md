@@ -51,8 +51,6 @@ You can install these packages using the following command in R:
 ```r
 install.packages(c("hydroGOF", "ncdf4", "qmap", "ncdf4.helpers", "DataCombine", "chron", "xgboost", "caret", "caTools", "e1071", "rBayesianOptimization"))
 
-
-
 Setup
 Working Directory:
 Replace all instances of YOUR_DIRECTORY_PATH in the scripts with the full path to your working directory. This directory should contain your input data (netCDF files, CSV feature files) and desired output directories.
@@ -94,4 +92,5 @@ Thakur al., 2025.
 
 Contact
 For any questions or suggestions, please contact Dr. Chandni at chandnithakur2@gmail.com
+
 
