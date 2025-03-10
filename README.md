@@ -48,7 +48,6 @@ The R scripts require the following packages:
 
 You can install these packages using the following command in R:
 
-```r
 install.packages(c("hydroGOF", "ncdf4", "qmap", "ncdf4.helpers", "DataCombine", "chron", "xgboost", "caret", "caTools", "e1071", "rBayesianOptimization"))
 
 Setup
@@ -92,5 +91,6 @@ Thakur al., 2025.
 
 Contact
 For any questions or suggestions, please contact Dr. Chandni at chandnithakur2@gmail.com
+
 
 
